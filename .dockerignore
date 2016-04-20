@@ -1,0 +1,5 @@
+.git/hooks/
+.git/info/
+.git/logs/
+.git/objects/
+node_modules/

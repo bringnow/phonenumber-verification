@@ -1,13 +1,24 @@
 const express = require('express');
 const smsController = require('./backends/esendex');
+const PhoneNumber = require('./db/phonenumber');
+const biguint = require('biguint-format');
+const crypto = require('crypto');
 
-// const PhoneNumberUtil = require('google-libphonenumber').PhoneNumberUtil;
-// const phoneUtil = PhoneNumberUtil.getInstance();
+const PhoneNumberUtil = require('google-libphonenumber').PhoneNumberUtil;
+const PhoneNumberFormat = require('google-libphonenumber').PhoneNumberFormat;
+const phoneUtil = PhoneNumberUtil.getInstance();
 //
 // const PHONE_NUMBER_VERIFICATION_BLOCK_TIME = 5 * 60 * 1000; // in milliseconds
 
+// FIXME should not be a server constant
+const DEFAULT_COUNTRY_CODE = 'DE';
+
 if (process.env.PHONE_NUMBER_VERIFICATION_DUMMY_CODE_ALLOWED === 'true') {
   console.warn('CAUTION: Dummy phone number verification code 12345 is allowed!');
+}
+
+if (process.env.SMS_DISABLED === 'true') {
+  console.warn('SMS dispatching is disabled. Unset SMS_DISABLED in order to enable it.');
 }
 
 const api = new express.Router();
@@ -19,44 +30,48 @@ const api = new express.Router();
 * @param phone_number: the phone number to verify
 * @return Promise
 */
-api.post('/', (req, res) => {
-  res.status(200);
-  res.send();
+api.post('/requestCode', (req, res) => {
+  const phoneNumber = req.body && req.body.phone_number;
 
-  // let promise;
-  // promise = User.findOne({'phone_number': phone_number, '_id': {'$ne': user_id}}).execAsync().then(function(user) {
-  //     if (user) {
-  //         throw new errors.PhoneNumberAlreadyExistsException(phone_number);
-  //     }
-  // });
-  //
-  // promise = promise.then(function() {
-  //     return self.findById(user_id);
-  // });
-  //
-  // promise = promise.then(function(user) {
-  //
-  //     user.phone_number = phone_number;
-  //
-  //     user.phone_number_verification = {
-  //         token: biguint(crypto.randomBytes(2), 'dec'),
-  //         token_valid_until: new Date(Date.now() + 10 * 60 * 1000) // valid 10 minutes
-  //     };
-  //
-  //     return user.saveAsync();
-  // });
-  //
-  // promise = promise.get(0).then(function(savedUser) {
-  //
-  //     return smsController.sendPhoneNumberVerificationSms(savedUser.phone_number,  savedUser.phone_number_verification.token);
-  // });
-  //
-  // promise = promise.then(function() {
-  //
-  //     return;
-  // });
-  //
-  // return promise;
+  const parsedPhoneNumber = phoneUtil.parse(phoneNumber, DEFAULT_COUNTRY_CODE);
+  const phoneNumberE164 = phoneUtil.format(parsedPhoneNumber, PhoneNumberFormat.E164);
+
+  let promise = PhoneNumber.findOne({ phone_number: phoneNumberE164 }).exec();
+
+  promise = promise.then((foundDbEntry) => {
+    let dbPhoneNumber = foundDbEntry;
+
+    if (!dbPhoneNumber) {
+      dbPhoneNumber = new PhoneNumber();
+    }
+
+    dbPhoneNumber.phone_number = phoneNumberE164;
+    dbPhoneNumber.token = biguint(crypto.randomBytes(2), 'dec');
+    dbPhoneNumber.token_valid_until = new Date(Date.now() + 10 * 60 * 1000); // valid 10 minutes
+
+    return dbPhoneNumber.save();
+  });
+
+  promise = promise.then((savedPhoneNumber) => {
+    if (process.env.SMS_DISABLED === 'true') {
+      console.warn(
+        'SMS dispatching is disabled. ' +
+        `Would send token ${savedPhoneNumber.token} to number ${savedPhoneNumber.phone_number}`
+      );
+      return Promise.resolve();
+    }
+
+    return smsController.sendSMS(
+      'bringnow',
+      savedPhoneNumber.phone_number,
+      `Der Code zur Verifizierung Ihrer Telefonnummer lautet: ${savedPhoneNumber.token}`
+    );
+  });
+
+  promise = promise.then(() => {
+    res.status(200);
+    res.send();
+  });
 });
 
 /**
@@ -78,15 +93,19 @@ api.post('/', (req, res) => {
     //
     // promise = promise.tap(function(user) {
     //
-    //     if(!user.phone_number_verification || !user.phone_number_verification.token) {
-    //         throw new errors.PhoneNumberVerificationFailed('No phone number verification requested');
+    //     if(!user.phone_number_verification
+    //     || !user.phone_number_verification.token) {
+    //         throw new errors.PhoneNumberVerificationFailed(
+    //          'No phone number verification requested');
     //     }
     //
     //     if(user.phone_number !== phone_number) {
-    //         throw new errors.PhoneNumberVerificationFailed('Phone number to validate does not match stored phone number!');
+    //         throw new errors.PhoneNumberVerificationFailed(
+    //          'Phone number to validate does not match stored phone number!');
     //     }
     //
-    //     if(!user.phone_number_verification.token_valid_until || user.phone_number_verification.token_valid_until < new Date()) {
+    //     if(!user.phone_number_verification.token_valid_until
+    //      || user.phone_number_verification.token_valid_until < new Date()) {
     //         throw new errors.PhoneNumberVerificationFailed('Verification token expired!');
     //     }
     //
