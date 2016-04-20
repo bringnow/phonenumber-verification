@@ -1,0 +1,24 @@
+{
+  "name": "phonenumber-verification",
+  "version": "0.1.0",
+  "description": "A phone number verification service",
+  "main": "index.js",
+  "dependencies": {
+    "elementtree": "^0.1.6",
+    "express": "^4.13.4",
+    "google-libphonenumber": "^1.0.17",
+    "request": "^2.72.0"
+  },
+  "devDependencies": {
+    "eslint": "^2.8.0",
+    "eslint-config-airbnb-base": "^1.0.1",
+    "eslint-plugin-import": "^1.5.0"
+  },
+  "scripts": {
+    "run": "node --use_strict index.js",
+    "lint": "./node_modules/.bin/eslint .",
+    "fixlint": "./node_modules/.bin/eslint --fix ."
+  },
+  "author": "bringnow Team <wecare@bringnow.com>",
+  "license": "AGPL-3.0"
+}
