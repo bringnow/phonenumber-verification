@@ -23,14 +23,14 @@ class EsendexSmsBackend {
     }
   }
 
-  generateRequestBody(phoneNumber, messageText) {
+  generateRequestBody(from, phoneNumber, messageText) {
     const messagesXml = new elementtree.Element('messages');
     const accountReferenceXml = new elementtree.SubElement(messagesXml, 'accountreference');
     accountReferenceXml.text = process.env.ESENDEX_ACCOUNT;
 
     const messageXml = new elementtree.SubElement(messagesXml, 'message');
     const fromXml = new elementtree.SubElement(messageXml, 'from');
-    fromXml.text = 'Flocker';
+    fromXml.text = from;
 
     const toXml = new elementtree.SubElement(messageXml, 'to');
     toXml.text = phoneNumber;
@@ -66,7 +66,7 @@ class EsendexSmsBackend {
         },
       };
 
-      const body = self.generateRequestBody(phoneNumber, messageText);
+      const body = self.generateRequestBody(from, phoneNumber, messageText);
       const url = `https://api.esendex.com/v1.0/messagedispatcher${process.env.ESENDEX_ACCOUNT}/SMS/Messages`;
 
       const req = request.post(url, options, (err, response) => {
@@ -89,7 +89,7 @@ class EsendexSmsBackend {
       req.end();
     });
 
-    promise = promise.tap(() => {
+    promise = promise.then(() => {
       console.info('Phone number verification SMS successfully sent');
     });
 
