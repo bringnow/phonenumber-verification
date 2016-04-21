@@ -49,10 +49,10 @@ const api = new express.Router();
 * @param message_type: the type of message to send: 'SMS' or 'Voice'. Default is 'SMS'
 */
 api.post('/requestCode', (req, res) => {
-  let promise = Promise.try(() => {
-    const phoneNumber = req.body && req.body.phone_number;
-    const messageType = (req.body && req.body.message_type) || 'SMS';
+  const phoneNumber = req.body && req.body.phone_number;
+  const messageType = (req.body && req.body.message_type) || 'SMS';
 
+  let promise = Promise.try(() => {
     if (messageType !== 'SMS' && messageType !== 'Voice') {
       throw new Error(`Invalid message type "${messageType}"` +
         'Allowed values: "SMS" or "Voice"');
@@ -96,10 +96,16 @@ api.post('/requestCode', (req, res) => {
       return Promise.resolve();
     }
 
+    // If we are sending a voice message, force every digit of the token
+    // to be pronounced at once by inserting a space between the digits.
+    const token = messageType === 'Voice' ?
+      savedPhoneNumber.token.split('').join(' ') :
+      savedPhoneNumber.token;
+
     return dispatchController.sendMessage(
       'bringnow',
       savedPhoneNumber.phone_number,
-      `Der Code zur Verifizierung Ihrer Telefonnummer lautet: ${savedPhoneNumber.token}`,
+      `Der Code zur Verifizierung Ihrer Telefonnummer lautet: ${token}`,
       'Voice',
       DEFAULT_LANGUAGE
     );
