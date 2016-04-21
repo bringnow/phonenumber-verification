@@ -1,11 +1,10 @@
 const express = require('express');
 const smsController = require('./backends/esendex');
 const PhoneNumber = require('./db/phonenumber');
-const biguint = require('biguint-format');
-const crypto = require('crypto');
 const Promise = require('bluebird');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
+const randomstring = require('randomstring');
 
 const PhoneNumberUtil = require('google-libphonenumber').PhoneNumberUtil;
 const PhoneNumberFormat = require('google-libphonenumber').PhoneNumberFormat;
@@ -26,6 +25,7 @@ const privateKey = fs.readFileSync(process.env.JWT_PRIVATE_KEY_FILE);
 
 // FIXME should not be a server constant
 const DEFAULT_COUNTRY_CODE = 'DE';
+const TOKEN_LENGTH = 5;
 
 const DUMMY_CODE_ALLOWED = process.env.DUMMY_CODE_ALLOWED === 'true';
 const SMS_DISABLED = process.env.SMS_DISABLED === 'true';
@@ -61,9 +61,9 @@ api.post('/requestCode', (req, res) => {
     }
 
     dbPhoneNumber.phone_number = phoneNumberE164;
-    dbPhoneNumber.token = biguint(crypto.randomBytes(2), 'dec', {
-      size: 5,
-      padstr: '0',
+    dbPhoneNumber.token = randomstring.generate({
+      length: TOKEN_LENGTH,
+      charset: 'numeric',
     });
     dbPhoneNumber.token_valid_until = new Date(Date.now() + 10 * 60 * 1000); // valid 10 minutes
 
