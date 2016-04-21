@@ -87,6 +87,12 @@ api.post('/requestCode', (req, res) => {
     res.status(200);
     res.send();
   });
+
+  // TODO better error handling
+  promise = promise.catch((err) => {
+    res.status(401);
+    res.send(err.message);
+  });
 });
 
 function verifyToken(dbPhoneNumber, token) {
@@ -153,6 +159,12 @@ api.post('/verify', (req, res) => {
   promise = promise.then((jwtToken) => {
     res.status(200);
     res.send(jwtToken);
+  });
+
+  // TODO better error handling
+  promise = promise.catch((err) => {
+    res.status(401);
+    res.send(err.message);
   });
 });
 
