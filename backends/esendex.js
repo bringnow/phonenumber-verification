@@ -1,7 +1,9 @@
 const request = require('request');
 const elementtree = require('elementtree');
 
-class EsendexSmsBackend {
+const VOICE_MESSAGE_RETRIES = 3;
+
+class EsendexBackend {
 
   constructor() {
     this.enabled = true;
@@ -23,33 +25,45 @@ class EsendexSmsBackend {
     }
   }
 
-  generateRequestBody(from, phoneNumber, messageText) {
-    const messagesXml = new elementtree.Element('messages');
-    const accountReferenceXml = new elementtree.SubElement(messagesXml, 'accountreference');
-    accountReferenceXml.text = process.env.ESENDEX_ACCOUNT;
+  generateRequestBody(from, phoneNumber, messageText, type, language) {
+    const messagesEl = new elementtree.Element('messages');
 
-    const messageXml = new elementtree.SubElement(messagesXml, 'message');
-    const fromXml = new elementtree.SubElement(messageXml, 'from');
-    fromXml.text = from;
+    const accountReferenceEl = new elementtree.SubElement(messagesEl, 'accountreference');
+    accountReferenceEl.text = process.env.ESENDEX_ACCOUNT;
 
-    const toXml = new elementtree.SubElement(messageXml, 'to');
-    toXml.text = phoneNumber;
+    const messageEl = new elementtree.SubElement(messagesEl, 'message');
 
-    const body = new elementtree.SubElement(messageXml, 'body');
+    const fromEl = new elementtree.SubElement(messageEl, 'from');
+    fromEl.text = from;
 
-    body.text = messageText;
+    const toEl = new elementtree.SubElement(messageEl, 'to');
+    toEl.text = phoneNumber;
 
-    const etree = new elementtree.ElementTree(messagesXml);
+    const bodyEl = new elementtree.SubElement(messageEl, 'body');
+    bodyEl.text = messageText;
+
+    if (type === 'Voice') {
+      const typeEl = new elementtree.SubElement(messageEl, 'type');
+      typeEl.text = 'Voice';
+
+      const langEl = new elementtree.SubElement(messageEl, 'lang');
+      langEl.text = language;
+
+      const retriesEl = new elementtree.SubElement(messageEl, 'retries');
+      retriesEl.text = VOICE_MESSAGE_RETRIES;
+    }
+
+    const etree = new elementtree.ElementTree(messagesEl);
     return etree.write({ xml_declaration: true });
   }
 
-  sendSMS(from, phoneNumber, messageText) {
+  sendMessage(from, phoneNumber, messageText, type, language) {
     const self = this;
     let promise;
 
     if (!this.enabled) {
       console.warn(
-        `SMS dispatching is not enabled. Not sending sms. Would send to number ${phoneNumber}`);
+        `Dispatching disabled. Not sending voice message. Would send to number ${phoneNumber}`);
       return Promise.resolve();
     }
 
@@ -66,7 +80,7 @@ class EsendexSmsBackend {
         },
       };
 
-      const body = self.generateRequestBody(from, phoneNumber, messageText);
+      const body = self.generateRequestBody(from, phoneNumber, messageText, type, language);
       const url = `https://api.esendex.com/v1.0/messagedispatcher${process.env.ESENDEX_ACCOUNT}/SMS/Messages`;
 
       const req = request.post(url, options, (err, response) => {
@@ -101,4 +115,4 @@ class EsendexSmsBackend {
   }
 }
 
-module.exports = new EsendexSmsBackend();
+module.exports = new EsendexBackend();

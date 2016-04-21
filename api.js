@@ -1,5 +1,5 @@
 const express = require('express');
-const smsController = require('./backends/esendex');
+const dispatchController = require('./backends/esendex');
 const PhoneNumber = require('./db/phonenumber');
 const Promise = require('bluebird');
 const fs = require('fs');
@@ -23,19 +23,21 @@ const privateKey = fs.readFileSync(process.env.JWT_PRIVATE_KEY_FILE);
 
 // const PHONE_NUMBER_VERIFICATION_BLOCK_TIME = 5 * 60 * 1000; // in milliseconds
 
-// FIXME should not be a server constant
+// FIXME languages and countries should not be a server constant
 const DEFAULT_COUNTRY_CODE = 'DE';
+const DEFAULT_LANGUAGE = 'de-DE';
+
 const TOKEN_LENGTH = 5;
 
 const DUMMY_CODE_ALLOWED = process.env.DUMMY_CODE_ALLOWED === 'true';
-const SMS_DISABLED = process.env.SMS_DISABLED === 'true';
+const DISPATCHING_DISABLED = process.env.DISPATCHING_DISABLED === 'true';
 
 if (DUMMY_CODE_ALLOWED) {
   console.warn('CAUTION: Dummy phone number verification code 12345 is allowed!');
 }
 
-if (SMS_DISABLED) {
-  console.warn('SMS dispatching is disabled. Unset SMS_DISABLED in order to enable it.');
+if (DISPATCHING_DISABLED) {
+  console.warn('Dispatching is disabled. Unset DISPATCHING_DISABLED in order to enable it.');
 }
 
 const api = new express.Router();
@@ -44,16 +46,31 @@ const api = new express.Router();
 * Sends a verification code to a given phone number
 *
 * @param phone_number: the phone number to verify
+* @param message_type: the type of message to send: 'SMS' or 'Voice'. Default is 'SMS'
 */
 api.post('/requestCode', (req, res) => {
-  const phoneNumber = req.body && req.body.phone_number;
+  let promise = Promise.try(() => {
+    const phoneNumber = req.body && req.body.phone_number;
+    const messageType = (req.body && req.body.message_type) || 'SMS';
 
-  const parsedPhoneNumber = phoneUtil.parse(phoneNumber, DEFAULT_COUNTRY_CODE);
-  const phoneNumberE164 = phoneUtil.format(parsedPhoneNumber, PhoneNumberFormat.E164);
+    if (messageType !== 'SMS' && messageType !== 'Voice') {
+      throw new Error(`Invalid message type "${messageType}"` +
+        'Allowed values: "SMS" or "Voice"');
+    }
 
-  let promise = PhoneNumber.findOne({ phone_number: phoneNumberE164 }).exec();
+    const parsedPhoneNumber = phoneUtil.parse(phoneNumber, DEFAULT_COUNTRY_CODE);
+    const phoneNumberE164 = phoneUtil.format(parsedPhoneNumber, PhoneNumberFormat.E164);
 
-  promise = promise.then((foundDbEntry) => {
+    return phoneNumberE164;
+  });
+
+  promise = promise.then((phoneNumberE164) =>
+    [
+      phoneNumberE164,
+      PhoneNumber.findOne({ phone_number: phoneNumberE164 }).exec(),
+    ]);
+
+  promise = promise.spread((phoneNumberE164, foundDbEntry) => {
     let dbPhoneNumber = foundDbEntry;
 
     if (!dbPhoneNumber) {
@@ -71,18 +88,20 @@ api.post('/requestCode', (req, res) => {
   });
 
   promise = promise.then((savedPhoneNumber) => {
-    if (SMS_DISABLED) {
+    if (DISPATCHING_DISABLED) {
       console.warn(
-        'SMS dispatching is disabled. ' +
+        'Dispatching is disabled. ' +
         `Would send token ${savedPhoneNumber.token} to number ${savedPhoneNumber.phone_number}`
       );
       return Promise.resolve();
     }
 
-    return smsController.sendSMS(
+    return dispatchController.sendMessage(
       'bringnow',
       savedPhoneNumber.phone_number,
-      `Der Code zur Verifizierung Ihrer Telefonnummer lautet: ${savedPhoneNumber.token}`
+      `Der Code zur Verifizierung Ihrer Telefonnummer lautet: ${savedPhoneNumber.token}`,
+      'Voice',
+      DEFAULT_LANGUAGE
     );
   });
 
@@ -123,7 +142,7 @@ function verifyToken(dbPhoneNumber, token) {
 * Verifies a phone number using a token previously send to it
 *
 * @param phone_number: The phone number to verify
-* @param token: the verification token send via SMS
+* @param token: the verification token send via sms / voice message
 */
 api.post('/verify', (req, res) => {
   const phoneNumber = req.body && req.body.phone_number;
