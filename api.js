@@ -61,7 +61,10 @@ api.post('/requestCode', (req, res) => {
     }
 
     dbPhoneNumber.phone_number = phoneNumberE164;
-    dbPhoneNumber.token = biguint(crypto.randomBytes(2), 'dec');
+    dbPhoneNumber.token = biguint(crypto.randomBytes(2), 'dec', {
+      size: 5,
+      padstr: '0',
+    });
     dbPhoneNumber.token_valid_until = new Date(Date.now() + 10 * 60 * 1000); // valid 10 minutes
 
     return dbPhoneNumber.save();
