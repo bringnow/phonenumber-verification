@@ -3,21 +3,38 @@ const smsController = require('./backends/esendex');
 const PhoneNumber = require('./db/phonenumber');
 const biguint = require('biguint-format');
 const crypto = require('crypto');
+const Promise = require('bluebird');
+const fs = require('fs');
+const jwt = require('jsonwebtoken');
 
 const PhoneNumberUtil = require('google-libphonenumber').PhoneNumberUtil;
 const PhoneNumberFormat = require('google-libphonenumber').PhoneNumberFormat;
 const phoneUtil = PhoneNumberUtil.getInstance();
-//
+
+const jwtSigningOptions = {
+  algorithm: 'RS256',
+};
+
+if (!process.env.JWT_PRIVATE_KEY_FILE) {
+  console.error('You need to define a RSA private key using the JWT_PRIVATE_KEY_FILE env variable');
+  process.exit(1);
+}
+
+const privateKey = fs.readFileSync(process.env.JWT_PRIVATE_KEY_FILE);
+
 // const PHONE_NUMBER_VERIFICATION_BLOCK_TIME = 5 * 60 * 1000; // in milliseconds
 
 // FIXME should not be a server constant
 const DEFAULT_COUNTRY_CODE = 'DE';
 
-if (process.env.PHONE_NUMBER_VERIFICATION_DUMMY_CODE_ALLOWED === 'true') {
+const DUMMY_CODE_ALLOWED = process.env.DUMMY_CODE_ALLOWED === 'true';
+const SMS_DISABLED = process.env.SMS_DISABLED === 'true';
+
+if (DUMMY_CODE_ALLOWED) {
   console.warn('CAUTION: Dummy phone number verification code 12345 is allowed!');
 }
 
-if (process.env.SMS_DISABLED === 'true') {
+if (SMS_DISABLED) {
   console.warn('SMS dispatching is disabled. Unset SMS_DISABLED in order to enable it.');
 }
 
@@ -26,9 +43,7 @@ const api = new express.Router();
 /**
 * Sends a verification code to a given phone number
 *
-* @param user_id: the user requesting the verification
 * @param phone_number: the phone number to verify
-* @return Promise
 */
 api.post('/requestCode', (req, res) => {
   const phoneNumber = req.body && req.body.phone_number;
@@ -53,7 +68,7 @@ api.post('/requestCode', (req, res) => {
   });
 
   promise = promise.then((savedPhoneNumber) => {
-    if (process.env.SMS_DISABLED === 'true') {
+    if (SMS_DISABLED) {
       console.warn(
         'SMS dispatching is disabled. ' +
         `Would send token ${savedPhoneNumber.token} to number ${savedPhoneNumber.phone_number}`
@@ -74,72 +89,71 @@ api.post('/requestCode', (req, res) => {
   });
 });
 
-/**
-* Verifies a user's phone number using a token send to it
-*
-* @param user_id: the user whose phone number should be verified
-* @param phone_number:
-* @param token: the verification token send via sms
-* @return Promise
-*/
-api.post('/', (req, res) => {
-  res.status(200);
-  res.send();
+function verifyToken(dbPhoneNumber, token) {
+  if (!dbPhoneNumber) {
+    throw new Error('No verification requested for this phone number');
+  }
 
-    // var self = this;
-    // var promise;
-    //
-    // promise = self.findById(user_id);
-    //
-    // promise = promise.tap(function(user) {
-    //
-    //     if(!user.phone_number_verification
-    //     || !user.phone_number_verification.token) {
-    //         throw new errors.PhoneNumberVerificationFailed(
-    //          'No phone number verification requested');
-    //     }
-    //
-    //     if(user.phone_number !== phone_number) {
-    //         throw new errors.PhoneNumberVerificationFailed(
-    //          'Phone number to validate does not match stored phone number!');
-    //     }
-    //
-    //     if(!user.phone_number_verification.token_valid_until
-    //      || user.phone_number_verification.token_valid_until < new Date()) {
-    //         throw new errors.PhoneNumberVerificationFailed('Verification token expired!');
-    //     }
-    //
-    //     if(self.phoneNumberVerificationAllowDummyCode && token === '12345') {
-    //         log.warn('User verified phone number using dummy token!');
-    //     } else if(user.phone_number_verification.token !== token) {
-    //         throw new errors.PhoneNumberVerificationFailed('Given reset token is invalid!');
-    //     }
-    //
-    //     user.phone_number_verified = true;
-    //     delete user.phone_number_verification.token;
-    //     delete user.phone_number_verification.token_valid_until;
-    //
-    //     return user;
-    // });
-    //
-    // promise = promise.then(function(user) {
-    //
-    //     user.changelog.push({
-    //         timestamp: Date.now(),
-    //         by: user._id,
-    //         event: 'updated',
-    //         description: 'User verified his/her phone number'
-    //     });
-    //
-    //     return user.saveAsync();
-    // });
-    //
-    // promise = promise.get(0).then(function(savedUser) {
-    //
-    //     return;
-    // });
-    //
-    // return promise;
+  if (!dbPhoneNumber.token_valid_until || dbPhoneNumber.token_valid_until < new Date()) {
+    throw new Error('Verification token expired!');
+  }
+
+  if (DUMMY_CODE_ALLOWED && token === '12345') {
+    console.warn('User verified phone number using dummy token!');
+    return;
+  }
+
+  if (dbPhoneNumber.token !== token) {
+    throw new Error('Given reset token is invalid!');
+  }
+
+  return;
+}
+
+/**
+* Verifies a phone number using a token previously send to it
+*
+* @param phone_number: The phone number to verify
+* @param token: the verification token send via SMS
+*/
+api.post('/verify', (req, res) => {
+  const phoneNumber = req.body && req.body.phone_number;
+  const token = req.body && req.body.token;
+
+  const parsedPhoneNumber = phoneUtil.parse(phoneNumber, DEFAULT_COUNTRY_CODE);
+  const phoneNumberE164 = phoneUtil.format(parsedPhoneNumber, PhoneNumberFormat.E164);
+
+  let promise = PhoneNumber.findOne({ phone_number: phoneNumberE164 }).exec();
+
+  promise = promise.then((foundDbEntry) => {
+    const dbPhoneNumber = foundDbEntry;
+
+    verifyToken(dbPhoneNumber, token);
+
+    dbPhoneNumber.last_verified = new Date();
+    delete dbPhoneNumber.token;
+    delete dbPhoneNumber.token_valid_until;
+
+    return dbPhoneNumber.save();
+  });
+
+  promise = promise.then((dbPhoneNumber) => {
+    const payload = {
+      phone_number: dbPhoneNumber.phone_number,
+      last_verified: dbPhoneNumber.last_verified,
+    };
+
+    return new Promise((resolve) => {
+      jwt.sign(payload, privateKey, jwtSigningOptions, (jwtToken) => {
+        resolve(jwtToken);
+      });
+    });
+  });
+
+  promise = promise.then((jwtToken) => {
+    res.status(200);
+    res.send(jwtToken);
+  });
 });
 
 module.exports = api;
