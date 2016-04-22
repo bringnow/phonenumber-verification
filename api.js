@@ -42,7 +42,7 @@ if (DISPATCHING_DISABLED) {
 }
 
 if (PRINT_TOKENS) {
-  console.warn('CAUTION! Generated token will be printed to stdout because PRINT_TOKENS=true.' +
+  console.warn('CAUTION! Generated token will be printed to stdout because PRINT_TOKENS=true. ' +
   'Do not use this in a production environment!');
 }
 
@@ -117,7 +117,7 @@ api.post('/requestCode', (req, res) => {
       'bringnow',
       savedPhoneNumber.phone_number,
       `Der Code zur Verifizierung Ihrer Telefonnummer lautet: ${token}`,
-      'Voice',
+      messageType,
       DEFAULT_LANGUAGE
     );
   });
