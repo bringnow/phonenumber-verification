@@ -31,6 +31,7 @@ const TOKEN_LENGTH = 5;
 
 const DUMMY_CODE_ALLOWED = process.env.DUMMY_CODE_ALLOWED === 'true';
 const DISPATCHING_DISABLED = process.env.DISPATCHING_DISABLED === 'true';
+const PRINT_TOKENS = process.env.PRINT_TOKENS === 'true';
 
 if (DUMMY_CODE_ALLOWED) {
   console.warn('CAUTION: Dummy phone number verification code 12345 is allowed!');
@@ -38,6 +39,11 @@ if (DUMMY_CODE_ALLOWED) {
 
 if (DISPATCHING_DISABLED) {
   console.warn('Dispatching is disabled. Unset DISPATCHING_DISABLED in order to enable it.');
+}
+
+if (PRINT_TOKENS) {
+  console.warn('CAUTION! Generated token will be printed to stdout because PRINT_TOKENS=true.' +
+  'Do not use this in a production environment!');
 }
 
 const api = new express.Router();
@@ -94,6 +100,11 @@ api.post('/requestCode', (req, res) => {
         `Would send token ${savedPhoneNumber.token} to number ${savedPhoneNumber.phone_number}`
       );
       return Promise.resolve();
+    }
+
+    if (PRINT_TOKENS) {
+      console.info(
+        `Sending token ${savedPhoneNumber.token} to number ${savedPhoneNumber.phone_number}`);
     }
 
     // If we are sending a voice message, force every digit of the token
@@ -154,10 +165,15 @@ api.post('/verify', (req, res) => {
   const phoneNumber = req.body && req.body.phone_number;
   const token = req.body && req.body.token;
 
-  const parsedPhoneNumber = phoneUtil.parse(phoneNumber, DEFAULT_COUNTRY_CODE);
-  const phoneNumberE164 = phoneUtil.format(parsedPhoneNumber, PhoneNumberFormat.E164);
+  let promise = Promise.try(() => {
+    const parsedPhoneNumber = phoneUtil.parse(phoneNumber, DEFAULT_COUNTRY_CODE);
+    const phoneNumberE164 = phoneUtil.format(parsedPhoneNumber, PhoneNumberFormat.E164);
 
-  let promise = PhoneNumber.findOne({ phone_number: phoneNumberE164 }).exec();
+    return phoneNumberE164;
+  });
+
+  promise = promise.then((phoneNumberE164) =>
+      PhoneNumber.findOne({ phone_number: phoneNumberE164 }).exec());
 
   promise = promise.then((foundDbEntry) => {
     const dbPhoneNumber = foundDbEntry;
@@ -191,6 +207,7 @@ api.post('/verify', (req, res) => {
 
   // TODO better error handling
   promise = promise.catch((err) => {
+    console.warn(`Verification of phone number ${phoneNumber} failed`);
     res.status(401);
     res.send(err.message);
   });
