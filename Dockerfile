@@ -1,4 +1,4 @@
-FROM node:5
+FROM node:6
 MAINTAINER Fabian Köster <fabian.koester@bringnow.com>
 
 # Set timezone to Europe/Berlin
