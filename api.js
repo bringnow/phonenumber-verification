@@ -3,7 +3,7 @@ const dispatchController = require('./backends/esendex');
 const PhoneNumber = require('./db/phonenumber');
 const Promise = require('bluebird');
 const fs = require('fs');
-const jwt = require('jsonwebtoken');
+const jwt = Promise.promisifyAll(require('jsonwebtoken'));
 const randomstring = require('randomstring');
 
 const PhoneNumberUtil = require('google-libphonenumber').PhoneNumberUtil;
@@ -32,6 +32,7 @@ const TOKEN_LENGTH = 5;
 const DUMMY_CODE_ALLOWED = process.env.DUMMY_CODE_ALLOWED === 'true';
 const DISPATCHING_DISABLED = process.env.DISPATCHING_DISABLED === 'true';
 const PRINT_TOKENS = process.env.PRINT_TOKENS === 'true';
+const LOG_SUCCESSFUL_VERIFICATIONS = process.env.LOG_SUCCESSFUL_VERIFICATIONS === 'true';
 
 if (DUMMY_CODE_ALLOWED) {
   console.warn('CAUTION: Dummy phone number verification code 12345 is allowed!');
@@ -97,14 +98,14 @@ api.post('/requestCode', (req, res) => {
     if (DISPATCHING_DISABLED) {
       console.warn(
         'Dispatching is disabled. ' +
-        `Would send token ${savedPhoneNumber.token} to number ${savedPhoneNumber.phone_number}`
+        `Would send token ${savedPhoneNumber.token} to number ${savedPhoneNumber.phone_number} (via ${messageType})`
       );
       return Promise.resolve();
     }
 
     if (PRINT_TOKENS) {
       console.info(
-        `Sending token ${savedPhoneNumber.token} to number ${savedPhoneNumber.phone_number}`);
+        `Sending token ${savedPhoneNumber.token} to number ${savedPhoneNumber.phone_number} (via ${messageType})`);
     }
 
     // If we are sending a voice message, force every digit of the token
@@ -132,6 +133,8 @@ api.post('/requestCode', (req, res) => {
     res.status(401);
     res.send(err.message);
   });
+
+  return promise;
 });
 
 function verifyToken(dbPhoneNumber, token) {
@@ -149,7 +152,7 @@ function verifyToken(dbPhoneNumber, token) {
   }
 
   if (dbPhoneNumber.token !== token) {
-    throw new Error('Given reset token is invalid!');
+    throw new Error('Given token is invalid!');
   }
 
   return;
@@ -180,6 +183,10 @@ api.post('/verify', (req, res) => {
 
     verifyToken(dbPhoneNumber, token);
 
+    if (LOG_SUCCESSFUL_VERIFICATIONS) {
+      console.log(`Succesfully verified phone number ${dbPhoneNumber.phone_number}`);
+    }
+
     dbPhoneNumber.last_verified = new Date();
     delete dbPhoneNumber.token;
     delete dbPhoneNumber.token_valid_until;
@@ -193,11 +200,7 @@ api.post('/verify', (req, res) => {
       last_verified: dbPhoneNumber.last_verified,
     };
 
-    return new Promise((resolve) => {
-      jwt.sign(payload, privateKey, jwtSigningOptions, (jwtToken) => {
-        resolve(jwtToken);
-      });
-    });
+    return jwt.signAsync(payload, privateKey, jwtSigningOptions);
   });
 
   promise = promise.then((jwtToken) => {
@@ -207,7 +210,7 @@ api.post('/verify', (req, res) => {
 
   // TODO better error handling
   promise = promise.catch((err) => {
-    console.warn(`Verification of phone number ${phoneNumber} failed`);
+    console.warn(`Verification of phone number ${phoneNumber} failed: ${err.message}`);
     res.status(401);
     res.send(err.message);
   });
